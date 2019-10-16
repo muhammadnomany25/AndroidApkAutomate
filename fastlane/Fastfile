@@ -1,0 +1,111 @@
+# This file contains the fastlane.tools configuration
+# You can find the documentation at https://docs.fastlane.tools
+#
+# For a list of all available actions, check out
+#
+#     https://docs.fastlane.tools/actions
+#
+# For a list of all available plugins, check out
+#
+#     https://docs.fastlane.tools/plugins/available-plugins
+#
+
+# Uncomment the line if you want fastlane to automatically update itself
+# update_fastlane
+
+default_platform(:android)
+require 'httparty'
+require 'net/http'
+require 'uri'
+require 'json'
+app_name="Example App"
+
+platform :android do
+    before_all do
+        ENV["SLACK_URL"] = "https://hooks.slack.com/services/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"
+    end
+
+    ######################### PUBLIC LANES #########################
+
+  lane :uploadToSlack do
+    # Run unit tests
+    gradle(
+      task: "assemble",
+      build_type: "Debug"
+    )
+    # upload_to_slack()
+  end
+
+ desc "Generate apk file"
+  lane :createApk do 
+    gradle(
+      task: "assemble",
+      build_type: "Debug"
+    )
+  end
+
+  desc "Submit a new version to my server"
+  lane :uploadToServer do |options|
+    createApk
+    upload_to_server(
+      endPoint: 'https://andro-team.000webhostapp.com/api/uploadApke.php',
+      multipartPayload: {
+        :appName => 'appName'
+      }
+
+    )
+
+  end
+    ######################### POST #########################
+
+    after_all do |lane|
+        file_path = lane_context[SharedValues::GRADLE_APK_OUTPUT_PATH]
+        file_name = file_path.gsub(/\/.*\//,"")
+        file_name_apk = file_name.gsub(/([C:])/,"")
+        slack(
+            message: "Successfully uploaded new apk for "+ app_name +"! :champagne:",
+            channel: "@Noamany,#Noamany",
+            default_payloads: [
+                :git_branch,
+                :last_git_commit_hash,
+                :last_git_commit_message
+            ],
+            payload: {
+                # Optional, lets you specify any number of your own Slack attachments.
+                "Build Date" => Time.new.to_s,
+                "APK" => "https://andro-team.000webhostapp.com/api/uploads/"+file_name_apk
+            },
+            success: true
+        )
+
+        ifttt(
+            api_key: "eN7tFrRz4GcmvSIlFeLi35AL6IdpRcxpPjuLg8YiVnj",
+            event_name: "build_success",
+            value1: lane_context[SharedValues::LANE_NAME],
+            value2: file_name_apk,
+            value3: lane_context[SharedValues::VERSION_NUMBER]
+        )
+    end
+
+    error do |lane, exception|
+        slack(
+            message: exception.message,
+            channel: "@team_android",
+                default_payloads: [
+                    :git_branch,
+                    :last_git_commit_hash,
+                    :last_git_commit_message
+                ],
+                payload: {
+                    "Build Date" => Time.new.to_s
+                },
+            success: false
+        )
+
+        ifttt(
+            api_key: "eN7tFrRz4GcmvSIlFeLi35AL6IdpRcxpPjuLg8YiVnj",
+            event_name: "build_failed",
+            value1: exception.message
+        )
+    end
+end
